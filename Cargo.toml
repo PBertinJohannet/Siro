@@ -1,0 +1,6 @@
+[package]
+name = "booleansimplify"
+version = "0.1.0"
+authors = ["pierre <pierre.bertin-johannet@orange.fr>"]
+
+[dependencies]
