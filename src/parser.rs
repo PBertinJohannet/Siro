@@ -64,7 +64,7 @@ impl EqParser {
         match self.check(&Token::Not) {
             true => {
                 self.advance();
-                Equation::Not(Box::new(Not::new(self.literal())))
+                Equation::Not(Box::new(Not::new(self.not())))
             }
             false => self.literal(),
         }

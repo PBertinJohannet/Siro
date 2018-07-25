@@ -1,6 +1,10 @@
 use lexer::EqLexer;
 use parser::EqParser;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::mem;
+use rand::random;
+use std::iter::FromIterator;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Equation {
@@ -15,46 +19,353 @@ impl Equation {
         EqParser::new(EqLexer::new(text).get_tokens().unwrap()).parse()
     }
 
+    pub fn remove_simplified(&mut self) {
+        match self {
+            &mut Equation::Sum(ref mut s) => s.remove_simplified(),
+            &mut Equation::Prod(ref mut p) => p.remove_simplified(),
+            _ => (),
+        }
+    }
+
+    pub fn reconstruct(&mut self){
+        match self {
+            &mut Equation::Sum(ref mut s) => {
+                let mut new_rep = mem::replace(&mut s.already_simplified, vec![]);
+                s.inner.append(&mut new_rep);
+                for p in s.inner.iter_mut(){
+                    p.reconstruct();
+                }
+            },
+            &mut Equation::Prod(ref mut p) => {
+                let mut new_rep = mem::replace(&mut p.already_simplified, vec![]);
+                p.inner.append(&mut new_rep);
+                for p in p.inner.iter_mut(){
+                    p.reconstruct();
+                }
+            },
+            &mut Equation::Not(ref mut n) => n.inner.reconstruct(),
+            _ => ()
+        }
+    }
+
+    pub fn len_removed(&mut self) -> usize{
+        match self {
+            &mut Equation::Sum(ref mut s) => s.already_simplified.len(),
+            _ => 0,
+        }
+    }
+
     pub fn eval(&self, vars: &HashMap<String, bool>) -> bool {
         match self {
             &Equation::Sum(ref s) => s.inner.iter().any(|inner| inner.eval(&vars)),
             &Equation::Prod(ref p) => p.inner.iter().all(|inner| inner.eval(&vars)),
             &Equation::Not(ref n) => !n.inner.eval(&vars),
-            &Equation::Var(ref e) => *vars.get(e).unwrap(),
+            &Equation::Var(ref e) => *vars.get(e)
+                .unwrap_or_else(||panic!(format!("var not found : {}", e))),
         }
+    }
+
+    pub fn inners(&self) -> Vec<&Equation> {
+        match self {
+            &Equation::Sum(ref s) => s.inner.iter().collect(),
+            &Equation::Prod(ref p) => p.inner.iter().collect(),
+            &Equation::Not(ref n) => vec![&n.inner],
+            v => vec![self],
+        }
+    }
+
+    /// True if the truthtables are the same.
+    pub fn compare_random_values(&self, other : &Equation, tests : usize) {
+        let vars = other.get_vars();
+        assert_eq!(vars.len(), self.get_vars().len());
+        for _ in 0..tests {
+            let vals = HashMap::from_iter(vars.iter().map(|&v|(v.clone(), random())));
+            assert_eq!(other.eval(&vals), self.eval(&vals));
+        }
+    }
+
+    pub fn into_inners(self) -> Vec<Equation> {
+        match self {
+            Equation::Sum(s) => s.inner,
+            Equation::Prod(p) => p.inner,
+            Equation::Not(n) => vec![n.inner],
+            v => vec![v],
+        }
+    }
+
+    pub fn complete_simplify(self) -> Self {
+        let ancient_nb_var = self.get_vars().len();
+        let mut old_self = self;
+        let mut new_self = old_self.clone().simplified();
+        while new_self != old_self {
+            old_self = new_self;
+            new_self = old_self.clone().simplified();
+            new_self.remove_simplified();
+        }
+        new_self.reconstruct();
+        new_self
+    }
+
+    pub fn is_product(&self) -> bool {
+        match self {
+            &Equation::Prod(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_simplified(&self, depth : usize) -> bool {
+        match self {
+            &Equation::Sum(ref s) => s
+                .inner
+                .iter()
+                .all(|inner| inner.is_simplified(depth + 1)),
+            &Equation::Prod(ref p) => p
+                .inner
+                .iter()
+                .all(|inner| inner.is_simplified(depth + 1)),
+            &Equation::Not(ref n) => n.inner.is_simplified(depth + 1),
+            &Equation::Var(_) => depth < 5,
+        }
+    }
+
+    /// Simplifies using simple basic rules.
+    pub fn simplified(self) -> Self {
+        match self {
+            Equation::Sum(s) => s.simplified(),
+            Equation::Prod(p) => p.simplified(),
+            Equation::Not(n) => n.simplified(),
+            v => v,
+        }
+    }
+
+    /// Returns a list of the names of the variables.
+    pub fn get_vars(&self) -> Vec<&String> {
+        let mut hs = HashSet::new();
+        match self {
+            &Equation::Sum(ref s) => s
+                .inner
+                .iter()
+                .flat_map(|inner| inner.get_vars().into_iter())
+                .collect::<Vec<&String>>(),
+            &Equation::Prod(ref p) => p
+                .inner
+                .iter()
+                .flat_map(|inner| inner.get_vars().into_iter())
+                .collect::<Vec<&String>>(),
+            &Equation::Not(ref n) => n.inner.get_vars(),
+            &Equation::Var(ref e) => vec![e],
+        }.into_iter()
+            .map(|var| hs.insert(var))
+            .for_each(drop);
+        hs.into_iter().collect()
+    }
+
+    /// Returns the depth of the tree
+    pub fn depth(&self, so_far: usize) -> usize {
+        match self {
+            &Equation::Sum(ref s) => s
+                .inner
+                .iter()
+                .map(|inner| inner.depth(so_far + 1))
+                .max()
+                .unwrap_or(0),
+            &Equation::Prod(ref p) => p
+                .inner
+                .iter()
+                .map(|inner| inner.depth(so_far + 1))
+                .max()
+                .unwrap_or(0),
+            &Equation::Not(ref n) => n.inner.depth(so_far + 1),
+            &Equation::Var(_) => so_far + 1,
+        }
+    }
+}
+
+impl fmt::Display for Equation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                &Equation::Sum(ref s) => format!(
+                    "({})",
+                    s.inner
+                        .iter()
+                        .map(|inner| format!("{}", inner))
+                        .collect::<Vec<String>>()
+                        .join(" + ")
+                ),
+                &Equation::Prod(ref p) => format!(
+                    "({})",
+                    p.inner
+                        .iter()
+                        .map(|inner| format!("{}", inner))
+                        .collect::<Vec<String>>()
+                        .join(" * ")
+                ),
+                &Equation::Not(ref n) => format!("! {}", n.inner),
+                &Equation::Var(ref e) => e.to_string(),
+            }
+        )
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sum {
     inner: Vec<Equation>,
+    already_simplified : Vec<Equation>,
 }
+
 impl Sum {
     pub fn new(inner: Vec<Equation>) -> Self {
-        Sum { inner: inner }
+        Sum { inner: inner , already_simplified : vec![]}
+    }
+
+    /// This must be called at the top level only.
+    pub fn remove_simplified(&mut self) {
+        let mut not_simp = vec![];
+        let mut simp = vec![];
+        for i in self.inner.iter_mut(){
+            if i.is_simplified(0){
+                simp.push( i.clone());
+            } else {
+                if i.is_product() {
+                    i.remove_simplified()
+                }
+                not_simp.push(i.clone());
+            }
+        }
+        self.inner = not_simp;
+        self.already_simplified.append(&mut simp);
+    }
+
+    /// Sums can be simplified using two simple rules :
+    /// sum(a) = a
+    /// sum(a, sum(b, c)) = sum (a, b, c)
+    pub fn simplified(mut self) -> Equation {
+        let mut new_inner = vec![];
+        for old_i in self.inner {
+            let mut i = old_i.simplified();
+            match i {
+                Equation::Sum(ref mut s) => new_inner.append(&mut s.inner),
+                _ => new_inner.push(i),
+            };
+        }
+        self.inner = new_inner;
+        if self.inner.len() == 1 {
+            let ret = self.inner.into_iter().next().unwrap();
+            return ret.simplified();
+        } else {
+            return Equation::Sum(Box::new(self));
+        }
     }
 }
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Prod {
     inner: Vec<Equation>,
+    already_simplified : Vec<Equation>,
 }
+
 impl Prod {
     pub fn new(inner: Vec<Equation>) -> Self {
-        Prod { inner: inner }
+        Prod { inner: inner , already_simplified : vec![]}
+    }
+    /// This must be called at the top level only.
+    pub fn remove_simplified(&mut self) {
+        let mut not_simp = vec![];
+        let mut simp = vec![];
+        for i in self.inner.iter_mut(){
+            if i.is_simplified(0){
+                simp.push( i.clone());
+            } else {
+                not_simp.push(i.clone());
+            }
+        }
+        self.inner = not_simp;
+        self.already_simplified.append(&mut simp);
+    }
+
+    pub fn factorise_for(mut self, i: usize) -> Equation {
+        let removed = self.inner.remove(i);
+        let mut new_sum_of_products = vec![];
+        for sub_sum_element in removed.into_inners() {
+            let mut new_inner = self.inner.clone();
+            new_inner.push(sub_sum_element);
+            new_sum_of_products.push(Equation::Prod(Box::new(Prod::new(new_inner))));
+        }
+        return Equation::Sum(Box::new(Sum::new(new_sum_of_products)));
+    }
+
+    pub fn flatten(mut self) -> Equation {
+        let mut new_inner = vec![];
+        for old_i in self.inner {
+            let mut i = old_i.simplified();
+            match i {
+                Equation::Prod(ref mut p) => new_inner.append(&mut p.inner),
+                _ => new_inner.push(i),
+            };
+        }
+        self.inner = new_inner;
+        if self.inner.len() == 1 {
+            let ret = self.inner.into_iter().next().unwrap();
+            return ret.simplified();
+        } else {
+            return Equation::Prod(Box::new(self));
+        }
+    }
+    /// Products can be simplified in the same way than the addition but we can also factorise :
+    /// a * (B + c + d) * e => (a * e * B) + (a * e * c) + (a * e * d)
+    ///
+    pub fn simplified(mut self) -> Equation {
+        self.inner = self
+            .inner
+            .into_iter()
+            .map(|inner| inner.simplified())
+            .collect();
+        for i in 0..self.inner.len() {
+            if mem::discriminant(&self.inner[i])
+                == mem::discriminant(&Equation::Sum(Box::new(Sum::new(vec![]))))
+            {
+                return self.factorise_for(i);
+            }
+        }
+        self.flatten()
     }
 }
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Not {
     inner: Equation,
 }
+
 impl Not {
     pub fn new(inner: Equation) -> Self {
         Not { inner: inner }
     }
+    pub fn simplified(mut self) -> Equation {
+        self.inner = self.inner.simplified();
+        match self.inner {
+            Equation::Not(box n) => n.inner.simplified(),
+            Equation::Sum(box s) => Equation::Prod(Box::new(Prod::new(
+                s.inner
+                    .into_iter()
+                    .map(|i| Equation::Not(Box::new(Not::new(i))))
+                    .collect(),
+            ))),
+            Equation::Prod(box s) => Equation::Sum(Box::new(Sum::new(
+                s.inner
+                    .into_iter()
+                    .map(|i| Equation::Not(Box::new(Not::new(i))))
+                    .collect(),
+            ))),
+            v => Equation::Not(Box::new(Not::new(v))),
+        }
+    }
 }
 
 #[cfg(test)]
-mod tests_parser {
+mod tests_eval {
     use super::*;
     use equation::{Equation, Not, Prod, Sum};
     use lexer::EqLexer;
@@ -107,4 +418,120 @@ mod tests_parser {
         vars.insert("y".to_string(), false);
         assert_eq!(eq.eval(&vars), true);
     }
+}
+
+#[cfg(test)]
+mod tests_get_var {
+    use super::*;
+    use equation::{Equation, Not, Prod, Sum};
+    use lexer::EqLexer;
+
+    #[test]
+    fn test_basics() {
+        let eq = Equation::from("a + b * c".to_string());
+        let mut vars = eq.get_vars();
+        vars.sort();
+        assert_eq!(vars, vec!["a", "b", "c"]);
+    }
+    #[test]
+    fn test_more() {
+        let eq = Equation::from("I & !B | (A + B) and (c + a./y)".to_string());
+        let mut vars = eq.get_vars();
+        vars.sort();
+        assert_eq!(vars, vec!["A", "B", "I", "a", "c", "y"]);
+    }
+}
+
+#[cfg(test)]
+mod tests_depth {
+    use super::*;
+    use equation::{Equation, Not, Prod, Sum};
+    use lexer::EqLexer;
+
+    #[test]
+    fn test_basics() {
+        let eq = Equation::from("a + b * c".to_string());
+        assert_eq!(eq.depth(0), 3);
+    }
+    #[test]
+    fn test_more() {
+        let eq = Equation::from("I & !B | (A + B) and (c + a./y)".to_string());
+        assert_eq!(eq.depth(0), 6);
+    }
+}
+
+#[cfg(test)]
+mod tests_simplify {
+    use super::*;
+    use equation::{Equation, Not, Prod, Sum};
+    use lexer::EqLexer;
+
+    #[test]
+    fn test_simplify_sum() {
+        let eq = Equation::from("a + (b + c + (a + j))".to_string());
+        let mut new_eq = eq.simplified();
+        for i in 0..4 {
+            new_eq = new_eq.simplified();
+        }
+        assert_eq!(format!("{}", new_eq), "(a + b + c + a + j)");
+    }
+
+    #[test]
+    fn test_factorise() {
+        let eq = Equation::from("a * (B + c + d) * e".to_string());
+        let new_eq = eq.simplified();
+        assert_eq!(
+            format!("{}", new_eq),
+            "((a * e * B) + (a * e * c) + (a * e * d))"
+        );
+    }
+
+    #[test]
+    fn test_flatten_prod() {
+        let eq = Equation::from("a * (b * c * (a * j))".to_string());
+        let new_eq = eq.simplified();
+        assert_eq!(format!("{}", new_eq), "(a * b * c * a * j)");
+    }
+
+    #[test]
+    fn test_remove_par() {
+        let eq = Equation::from("(((a))) * ((b)) + (((c)))".to_string());
+        let new_eq = eq.simplified();
+        assert_eq!(format!("{}", new_eq), "((a * b) + c)");
+    }
+
+    #[test]
+    fn test_not_sum() {
+        let eq = Equation::from("!(a + b + c)".to_string());
+        let new_eq = eq.simplified();
+        assert_eq!(format!("{}", new_eq), "(! a * ! b * ! c)");
+    }
+
+    #[test]
+    fn test_not_not() {
+        let eq = Equation::from("!!(a + b + c)".to_string());
+        let new_eq = eq.simplified().simplified();
+        assert_eq!(format!("{}", new_eq), "(a + b + c)");
+    }
+
+    #[test]
+    fn test_not_prod() {
+        let eq = Equation::from("!(a * b * c)".to_string());
+        let new_eq = eq.simplified().simplified();
+        assert_eq!(format!("{}", new_eq), "(! a + ! b + ! c)");
+    }
+
+    #[test]
+    fn combined_tests() {
+        let eq = Equation::from(" A. B + (!((C . B) + D ) . A) + B".to_string());
+        let new_eq = eq.clone().complete_simplify();
+        new_eq.compare_random_values(&eq, 1000);
+        let eq = Equation::from(" I & !B | (A + B) and (c + a./y)".to_string());
+        let new_eq = eq.clone().complete_simplify();
+        new_eq.compare_random_values(&eq, 1000);
+        let eq = Equation::from("! ((OD * ((((POLYGi1 * POBIASPdrawing2))) + (((POLYGi1 * POBIASMdrawing2))))))".to_string());
+        let new_eq = eq.clone().complete_simplify();
+        new_eq.compare_random_values(&eq, 1000);
+    }
+
 }
