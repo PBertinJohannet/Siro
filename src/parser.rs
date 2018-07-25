@@ -1,7 +1,7 @@
 use equation::{Equation, Not, Prod, Sum};
 use lexer::Token;
 
-struct EqParser {
+pub struct EqParser {
     tokens: Vec<Token>,
     pos: usize,
 }
@@ -118,7 +118,7 @@ mod tests_parser {
                 Equation::Prod(Box::new(Prod::new(vec![
                     Equation::Sum(Box::new(Sum::new(vec![
                         Equation::Prod(Box::new(Prod::new(vec![Equation::Var("A".to_string())]))),
-                       Equation::Prod(Box::new(Prod::new(vec![Equation::Var("B".to_string())]))),
+                        Equation::Prod(Box::new(Prod::new(vec![Equation::Var("B".to_string())]))),
                     ]))),
                     Equation::Sum(Box::new(Sum::new(vec![
                         Equation::Prod(Box::new(Prod::new(vec![Equation::Var("c".to_string())]))),
