@@ -22,7 +22,6 @@ impl Equation {
     pub fn remove_simplified(&mut self) {
         match self {
             &mut Equation::Sum(ref mut s) => s.remove_simplified(),
-            &mut Equation::Prod(ref mut p) => p.remove_simplified(),
             _ => (),
         }
     }
@@ -37,8 +36,6 @@ impl Equation {
                 }
             },
             &mut Equation::Prod(ref mut p) => {
-                let mut new_rep = mem::replace(&mut p.already_simplified, vec![]);
-                p.inner.append(&mut new_rep);
                 for p in p.inner.iter_mut(){
                     p.reconstruct();
                 }
@@ -229,9 +226,6 @@ impl Sum {
             if i.is_simplified(0){
                 simp.push( i.clone());
             } else {
-                if i.is_product() {
-                    i.remove_simplified()
-                }
                 not_simp.push(i.clone());
             }
         }
@@ -270,20 +264,6 @@ pub struct Prod {
 impl Prod {
     pub fn new(inner: Vec<Equation>) -> Self {
         Prod { inner: inner , already_simplified : vec![]}
-    }
-    /// This must be called at the top level only.
-    pub fn remove_simplified(&mut self) {
-        let mut not_simp = vec![];
-        let mut simp = vec![];
-        for i in self.inner.iter_mut(){
-            if i.is_simplified(0){
-                simp.push( i.clone());
-            } else {
-                not_simp.push(i.clone());
-            }
-        }
-        self.inner = not_simp;
-        self.already_simplified.append(&mut simp);
     }
 
     pub fn factorise_for(mut self, i: usize) -> Equation {
@@ -499,6 +479,7 @@ mod tests_simplify {
         let new_eq = eq.simplified();
         assert_eq!(format!("{}", new_eq), "((a * b) + c)");
     }
+
 
     #[test]
     fn test_not_sum() {

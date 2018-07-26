@@ -7,8 +7,12 @@ extern crate rand;
 use equation::Equation;
 
 
+
 fn main() {
-    let eq = Equation::from("a + b * c or not ! / i & b and c +(e.o)".to_string());
+    // These are the worst
+    let eq = Equation::from("!((a * b) + (b * c) + (c * d))".to_string().replace("&", ""));
+    println!("eq : {}", eq);
     let new_eq = eq.complete_simplify();
-    println!("new eq is : {}", new_eq);
+    println!("depth : {}", new_eq.depth(0));
+    println!("new eq len : {}", format!("{}", new_eq).len()); // 159 characters.
 }
