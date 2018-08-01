@@ -5,6 +5,8 @@ use std::fmt;
 use std::mem;
 use rand::random;
 use std::iter::FromIterator;
+use mccluskey::PrimeImplicant;
+use mccluskey::mccluskey;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Equation {
@@ -60,6 +62,14 @@ impl Equation {
             &Equation::Var(ref e) => *vars.get(e)
                 .unwrap_or_else(||panic!(format!("var not found : {}", e))),
         }
+    }
+
+    pub fn mccluskey(&mut self){
+        let vars = self.get_owned_vars();
+        let new_sum = match self {
+            &mut Equation::Sum(ref mut s) => s.inner = mccluskey(s.get_primes_implicants()),
+            _ => ()
+        };
     }
 
     pub fn inners(&self) -> Vec<&Equation> {
@@ -139,16 +149,8 @@ impl Equation {
     pub fn get_vars(&self) -> Vec<&String> {
         let mut hs = HashSet::new();
         match self {
-            &Equation::Sum(ref s) => s
-                .inner
-                .iter()
-                .flat_map(|inner| inner.get_vars().into_iter())
-                .collect::<Vec<&String>>(),
-            &Equation::Prod(ref p) => p
-                .inner
-                .iter()
-                .flat_map(|inner| inner.get_vars().into_iter())
-                .collect::<Vec<&String>>(),
+            &Equation::Sum(ref s) => s.get_vars(),
+            &Equation::Prod(ref p) => p.get_vars(),
             &Equation::Not(ref n) => n.inner.get_vars(),
             &Equation::Var(ref e) => vec![e],
         }.into_iter()
@@ -156,6 +158,18 @@ impl Equation {
             .for_each(drop);
         hs.into_iter().collect()
     }
+
+    /// Returns a list of the names of the variables.
+    pub fn get_only_var(&self) -> &String {
+        self.get_vars()[0]
+    }
+
+
+    /// Returns a list of the names of the variables.
+    pub fn get_owned_vars(&self) -> Vec<String> {
+        self.get_vars().iter().map(|&i|i.clone()).collect()
+    }
+
 
     /// Returns the depth of the tree
     pub fn depth(&self, so_far: usize) -> usize {
@@ -218,6 +232,27 @@ impl Sum {
         Sum { inner: inner , already_simplified : vec![]}
     }
 
+    /// Applyes the queen mccluskey algorithm to reduce the size of the sum.
+    pub fn get_primes_implicants(&self) -> (Vec<String>, Vec<PrimeImplicant>){
+        let vars = self.get_vars();
+        (self.get_owned_vars(), self.inner.iter().map(|i|PrimeImplicant::from_eq(i, &vars)).collect())
+    }
+
+
+    /// Returns a list of the names of the variables.
+    pub fn get_owned_vars(&self) -> Vec<String> {
+        self.get_vars().iter().map(|&i|i.clone()).collect()
+    }
+
+    /// Returns a list of the names of the variables.
+    pub fn get_vars(&self) -> Vec<&String> {
+        let mut hs = HashSet::new();
+        self.inner.iter().flat_map(|inner| inner.get_vars().into_iter()).into_iter()
+            .map(|var| hs.insert(var))
+            .for_each(drop);
+        hs.into_iter().collect()
+    }
+
     /// This must be called at the top level only.
     pub fn remove_simplified(&mut self) {
         let mut not_simp = vec![];
@@ -266,6 +301,32 @@ impl Prod {
         Prod { inner: inner , already_simplified : vec![]}
     }
 
+    pub fn removed_doublons(&self) -> Vec<Equation>{
+        let mut inn = self.inner.clone();
+        inn.sort_by_key(|a|a.get_only_var().to_string());
+        let mut in_order_vars = inn.iter();
+        let mut prev = match in_order_vars.next(){
+            Some(p) => p,
+            _ => return vec![],
+        };
+        let mut new_inner = vec![];
+        while let Some(next) = in_order_vars.next(){
+        println!("next {}, prev {}, newinn : {:?}",next, prev, new_inner);
+            if next.get_only_var() == prev.get_only_var(){
+                // inside can only be Var or Not(Var) because it is simplified.
+                if mem::discriminant(next) != mem::discriminant(prev){
+                    return vec![]
+                }
+            } else {
+                new_inner.push(prev.clone());
+            }
+            prev = next;
+        }
+        new_inner.push(prev.clone());
+        println!("returning : {:?}", new_inner);
+        new_inner.clone()
+    }
+
     pub fn factorise_for(mut self, i: usize) -> Equation {
         let removed = self.inner.remove(i);
         let mut new_sum_of_products = vec![];
@@ -312,6 +373,15 @@ impl Prod {
         }
         self.flatten()
     }
+
+    /// Returns a list of the names of the variables.
+    pub fn get_vars(&self) -> Vec<&String> {
+        let mut hs = HashSet::new();
+        self.inner.iter().flat_map(|inner| inner.get_vars().into_iter()).into_iter()
+            .map(|var| hs.insert(var))
+            .for_each(drop);
+        hs.into_iter().collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -323,6 +393,12 @@ impl Not {
     pub fn new(inner: Equation) -> Self {
         Not { inner: inner }
     }
+
+    /// Returns a list of the names of the variables.
+    pub fn get_only_var(&self) -> &String {
+        self.inner.get_vars()[0]
+    }
+
     pub fn simplified(mut self) -> Equation {
         self.inner = self.inner.simplified();
         match self.inner {
@@ -500,6 +576,13 @@ mod tests_simplify {
         let eq = Equation::from("!(a * b * c)".to_string());
         let new_eq = eq.simplified().simplified();
         assert_eq!(format!("{}", new_eq), "(! a + ! b + ! c)");
+    }
+
+    #[test]
+    fn test_keep_same() {
+        let eq = Equation::from("b*  a".to_string());
+        let new_eq = eq.simplified().simplified();
+        assert_eq!(format!("{}", new_eq), "(b * a)");
     }
 
     #[test]
