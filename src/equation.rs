@@ -65,9 +65,11 @@ impl Equation {
     }
 
     pub fn mccluskey(&mut self){
-        let vars = self.get_owned_vars();
         let new_sum = match self {
-            &mut Equation::Sum(ref mut s) => s.inner = mccluskey(s.get_primes_implicants()),
+            &mut Equation::Sum(ref mut s) => {
+                let res = mccluskey(s.get_primes_implicants());
+                s.inner = res;
+            },
             _ => ()
         };
     }
@@ -105,11 +107,13 @@ impl Equation {
         let mut old_self = self;
         let mut new_self = old_self.clone().simplified();
         while new_self != old_self {
+            //println!("self len : {}", format!("{}", new_self).len());
             old_self = new_self;
             new_self = old_self.clone().simplified();
             new_self.remove_simplified();
         }
         new_self.reconstruct();
+        new_self.mccluskey();
         new_self
     }
 
@@ -156,7 +160,9 @@ impl Equation {
         }.into_iter()
             .map(|var| hs.insert(var))
             .for_each(drop);
-        hs.into_iter().collect()
+        let mut to_ret = hs.into_iter().collect::<Vec<&String>>();
+        to_ret.sort();
+        to_ret
     }
 
     /// Returns a list of the names of the variables.
@@ -235,7 +241,8 @@ impl Sum {
     /// Applyes the queen mccluskey algorithm to reduce the size of the sum.
     pub fn get_primes_implicants(&self) -> (Vec<String>, Vec<PrimeImplicant>){
         let vars = self.get_vars();
-        (self.get_owned_vars(), self.inner.iter().map(|i|PrimeImplicant::from_eq(i, &vars)).collect())
+        (vars.clone().into_iter().map(|i|i.clone()).collect(),
+         self.inner.iter().map(|ref i|PrimeImplicant::from_eq(i, &vars)).collect())
     }
 
 
@@ -250,7 +257,9 @@ impl Sum {
         self.inner.iter().flat_map(|inner| inner.get_vars().into_iter()).into_iter()
             .map(|var| hs.insert(var))
             .for_each(drop);
-        hs.into_iter().collect()
+        let mut to_ret = hs.into_iter().collect::<Vec<&String>>();
+        to_ret.sort();
+        to_ret
     }
 
     /// This must be called at the top level only.
@@ -293,12 +302,11 @@ impl Sum {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Prod {
     inner: Vec<Equation>,
-    already_simplified : Vec<Equation>,
 }
 
 impl Prod {
     pub fn new(inner: Vec<Equation>) -> Self {
-        Prod { inner: inner , already_simplified : vec![]}
+        Prod { inner: inner }
     }
 
     pub fn removed_doublons(&self) -> Vec<Equation>{
@@ -311,7 +319,6 @@ impl Prod {
         };
         let mut new_inner = vec![];
         while let Some(next) = in_order_vars.next(){
-        println!("next {}, prev {}, newinn : {:?}",next, prev, new_inner);
             if next.get_only_var() == prev.get_only_var(){
                 // inside can only be Var or Not(Var) because it is simplified.
                 if mem::discriminant(next) != mem::discriminant(prev){
@@ -323,7 +330,6 @@ impl Prod {
             prev = next;
         }
         new_inner.push(prev.clone());
-        println!("returning : {:?}", new_inner);
         new_inner.clone()
     }
 
@@ -335,7 +341,7 @@ impl Prod {
             new_inner.push(sub_sum_element);
             new_sum_of_products.push(Equation::Prod(Box::new(Prod::new(new_inner))));
         }
-        return Equation::Sum(Box::new(Sum::new(new_sum_of_products)));
+        Equation::Sum(Box::new(Sum::new(new_sum_of_products))).complete_simplify()
     }
 
     pub fn flatten(mut self) -> Equation {
@@ -380,7 +386,9 @@ impl Prod {
         self.inner.iter().flat_map(|inner| inner.get_vars().into_iter()).into_iter()
             .map(|var| hs.insert(var))
             .for_each(drop);
-        hs.into_iter().collect()
+        let mut to_ret = hs.into_iter().collect::<Vec<&String>>();
+        to_ret.sort();
+        to_ret
     }
 }
 
@@ -400,7 +408,7 @@ impl Not {
     }
 
     pub fn simplified(mut self) -> Equation {
-        self.inner = self.inner.simplified();
+        self.inner = self.inner.complete_simplify();
         match self.inner {
             Equation::Not(box n) => n.inner.simplified(),
             Equation::Sum(box s) => Equation::Prod(Box::new(Prod::new(
@@ -525,20 +533,17 @@ mod tests_simplify {
     #[test]
     fn test_simplify_sum() {
         let eq = Equation::from("a + (b + c + (a + j))".to_string());
-        let mut new_eq = eq.simplified();
-        for i in 0..4 {
-            new_eq = new_eq.simplified();
-        }
-        assert_eq!(format!("{}", new_eq), "(a + b + c + a + j)");
+        let mut new_eq = eq.complete_simplify();
+        assert_eq!(format!("{}", new_eq), "(a + b + c + j)");
     }
 
     #[test]
     fn test_factorise() {
         let eq = Equation::from("a * (B + c + d) * e".to_string());
-        let new_eq = eq.simplified();
+        let new_eq = eq.complete_simplify();
         assert_eq!(
             format!("{}", new_eq),
-            "((a * e * B) + (a * e * c) + (a * e * d))"
+            "((B * a * e) + (a * c * e) + (a * d * e))"
         );
     }
 
