@@ -598,7 +598,7 @@ mod tests_simplify {
         let eq = Equation::from(" I & !B | (A + B) and (c + a./y)".to_string());
         let new_eq = eq.clone().complete_simplify();
         new_eq.compare_random_values(&eq, 1000);
-        let eq = Equation::from("! ((OD * ((((POLYGi1 * POBIASPdrawing2))) + (((POLYGi1 * POBIASMdrawing2))))))".to_string());
+        let eq = Equation::from("!(!a*!f + !b*!c + !d*!e)".to_string());
         let new_eq = eq.clone().complete_simplify();
         new_eq.compare_random_values(&eq, 1000);
     }

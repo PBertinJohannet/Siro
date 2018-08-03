@@ -1,4 +1,4 @@
-/// Creates
+/// Applyes the mccluskey algorithm to find the essential prime implicants of an expression.
 ///
 use equation::{Equation, Sum, Prod, Not};
 use std::collections::HashSet;
@@ -17,6 +17,7 @@ pub struct PrimeImplicant {
 }
 
 impl PrimeImplicant {
+    /// Creates a primeImplicant from an equation and the order of the variables.
     pub fn from_eq(eq : &Equation, vars : &Vec<&String>) -> Self {
         let len = vars.len();
         match eq {
@@ -26,6 +27,7 @@ impl PrimeImplicant {
             &Equation::Var(ref v) => Self::any_with(vars.iter().position(|&x| x == v).unwrap(), Present::Yes, len),
         }
     }
+    /// creates a prime from a product ( eg. a*!x)
     pub fn from_prod(p : &Prod, vars : &Vec<&String>) -> Self {
         let list = vars.iter().map( | &var| match p.removed_doublons().iter()
             .find( | i|i.get_only_var() == var){
@@ -42,6 +44,7 @@ impl PrimeImplicant {
             nb_yes: nb_yes,
         }
     }
+    /// create a prime of the form x or !x
     pub fn any_with(pos : usize, val : Present, len : usize) -> Self {
         PrimeImplicant {
             list: (0..len).map(|i|match i == pos {
@@ -55,7 +58,7 @@ impl PrimeImplicant {
             },
         }
     }
-
+    /// Returns to the product expression.
     pub fn to_eq(self, vars : &Vec<&String>) -> Equation {
         Equation::Prod(Box::new(Prod::new(self.list.into_iter().zip(vars.iter()).filter_map(|(pres, var)| match pres {
             Present::Yes => Some(Equation::Var(var.to_string())),
@@ -126,7 +129,8 @@ pub fn merge_similar(prime : PrimeImplicant, others : &mut Vec<PrimeImplicant>)-
     }
     None
 }
-
+/// Given the primes implicants of an expression and the associated variables, returns the sop
+/// containing only essentials primes implicants.
 pub fn mccluskey((vars, mut impls) : (Vec<String>, Vec<PrimeImplicant>)) -> Vec<Equation>{
     let mut hs = HashSet::new();
     mccluskey_primes(impls)
@@ -168,6 +172,7 @@ pub fn mccluskey_pass_two(mut sorted_primes : Vec<Vec<PrimeImplicant>>) -> Vec<P
     to_add
 }
 
+/// Returns the essentials primes implicants given some non essential primes implicants
 pub fn mccluskey_primes(mut impls : Vec<PrimeImplicant>)-> Vec<PrimeImplicant>{
     let mut size_before = impls.len();
     let mut sorted_primes = sort_prime_implicants(impls); // l of l
